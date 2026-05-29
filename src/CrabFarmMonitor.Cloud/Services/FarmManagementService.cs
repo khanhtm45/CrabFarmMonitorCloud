@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using CrabFarmMonitor.Cloud.Data;
 using CrabFarmMonitor.Cloud.Data.Entities;
@@ -6,18 +7,48 @@ namespace CrabFarmMonitor.Cloud.Services;
 
 public sealed class FarmManagementService
 {
+    private static readonly Regex FrCodePattern = new(
+        @"^FR-(\d+)$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private readonly RasCloudDbContext _db;
 
     public FarmManagementService(RasCloudDbContext db) => _db = db;
+
+    /// <summary>Mã tiếp theo: FR-1, FR-2, … theo max số trong org.</summary>
+    public async Task<string> GenerateNextFarmCodeAsync(Guid orgId, CancellationToken ct = default)
+    {
+        var codes = await _db.Farms.AsNoTracking()
+            .Where(f => f.OrgId == orgId)
+            .Select(f => f.Code)
+            .ToListAsync(ct);
+
+        var max = 0;
+        foreach (var c in codes)
+        {
+            var m = FrCodePattern.Match(c.Trim());
+            if (m.Success && int.TryParse(m.Groups[1].Value, out var n) && n > max)
+                max = n;
+        }
+
+        var candidate = max + 1;
+        while (codes.Any(c => string.Equals(c, $"FR-{candidate}", StringComparison.OrdinalIgnoreCase)))
+            candidate++;
+
+        return $"FR-{candidate}";
+    }
 
     public async Task<Farm> CreateAsync(FarmAccess access, UpsertFarmRequest req, CancellationToken ct)
     {
         if (!access.IsOrgAdmin)
             throw new UnauthorizedAccessException("Chỉ admin/owner được tạo trại mới");
 
-        var code = req.Code.Trim();
-        if (string.IsNullOrEmpty(code) || string.IsNullOrWhiteSpace(req.Name))
-            throw new ArgumentException("code và name bắt buộc");
+        if (string.IsNullOrWhiteSpace(req.Name))
+            throw new ArgumentException("name bắt buộc");
+
+        var code = string.IsNullOrWhiteSpace(req.Code)
+            ? await GenerateNextFarmCodeAsync(access.OrgId, ct)
+            : req.Code.Trim();
 
         if (await _db.Farms.AnyAsync(f => f.OrgId == access.OrgId && f.Code == code, ct))
             throw new ArgumentException($"Mã trại '{code}' đã tồn tại");
@@ -50,15 +81,6 @@ public sealed class FarmManagementService
 
         if (!access.IsOrgAdmin && farm.OwnerId != access.UserId)
             throw new UnauthorizedAccessException("Không có quyền sửa trại này");
-
-        if (!string.IsNullOrWhiteSpace(req.Code))
-        {
-            var code = req.Code.Trim();
-            if (await _db.Farms.AnyAsync(
-                    f => f.OrgId == access.OrgId && f.Code == code && f.Id != farmId, ct))
-                throw new ArgumentException($"Mã trại '{code}' đã tồn tại");
-            farm.Code = code;
-        }
 
         if (!string.IsNullOrWhiteSpace(req.Name))
             farm.Name = req.Name.Trim();

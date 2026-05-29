@@ -349,6 +349,20 @@ dashboard.MapGet("/farms", async (ClaimsPrincipal user, FarmScopeService scope, 
     });
 });
 
+dashboard.MapGet("/farms/next-code", async (
+    ClaimsPrincipal user,
+    FarmScopeService scopeSvc,
+    FarmManagementService farms,
+    CancellationToken ct) =>
+{
+    var access = await scopeSvc.LoadAsync(user, ct);
+    if (access == null) return Results.Unauthorized();
+    if (!access.IsOrgAdmin)
+        return Results.Json(new { ok = false, error = "admin required" }, statusCode: 403);
+    var code = await farms.GenerateNextFarmCodeAsync(access.OrgId, ct);
+    return Results.Json(new { ok = true, code });
+});
+
 dashboard.MapPost("/farms", async (
     UpsertFarmRequest body,
     ClaimsPrincipal user,

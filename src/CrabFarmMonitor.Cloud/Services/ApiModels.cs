@@ -1,7 +1,7 @@
 namespace CrabFarmMonitor.Cloud.Services;
 
 public sealed record UpsertFarmRequest(
-    string Code,
+    string? Code,
     string Name,
     string? Address = null,
     string? Description = null);
