@@ -36,6 +36,7 @@ builder.Services.AddScoped<WaterAlertService>();
 builder.Services.AddScoped<DeviceShadowService>();
 builder.Services.AddScoped<SensorBatchSyncService>();
 builder.Services.AddScoped<FarmLayoutService>();
+builder.Services.AddScoped<FarmManagementService>();
 builder.Services.AddScoped<DeviceConfigService>();
 builder.Services.AddScoped<CameraAiService>();
 builder.Services.AddSingleton<LocalMediaStorage>();
@@ -197,7 +198,7 @@ app.MapGet("/", () => Results.Json(new
         "POST /api/auth/login",
         "GET /api/auth/me (Bearer)",
         "GET /api/dashboard/summary (Bearer)",
-        "GET /api/farms",
+        "GET|POST|PUT|DELETE /api/farms",
         "GET /api/devices",
         "POST /api/telemetry (Edge, X-API-Key)",
         "POST /api/sync/hdf5 (Edge)",
@@ -332,10 +333,95 @@ dashboard.MapGet("/farms", async (ClaimsPrincipal user, FarmScopeService scope, 
     return Results.Json(new
     {
         ok = true,
-        farms = farms.Select(f => new { f.Id, f.Code, f.Name, f.OrgId }),
+        farms = farms.Select(f => new
+        {
+            f.Id,
+            f.Code,
+            f.Name,
+            f.OrgId,
+            f.Address,
+            f.Description,
+            f.OwnerId,
+            f.CreatedAt
+        }),
         isOrgAdmin = access.IsOrgAdmin,
         canViewAllFarms = access.IsOrgAdmin
     });
+});
+
+dashboard.MapPost("/farms", async (
+    UpsertFarmRequest body,
+    ClaimsPrincipal user,
+    FarmScopeService scopeSvc,
+    FarmManagementService farms,
+    CancellationToken ct) =>
+{
+    var access = await scopeSvc.LoadAsync(user, ct);
+    if (access == null) return Results.Unauthorized();
+    try
+    {
+        var farm = await farms.CreateAsync(access, body, ct);
+        return Results.Json(new { ok = true, farm }, statusCode: StatusCodes.Status201Created);
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        return Results.Json(new { ok = false, error = ex.Message }, statusCode: 403);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
+});
+
+dashboard.MapPut("/farms/{id:guid}", async (
+    Guid id,
+    UpsertFarmRequest body,
+    ClaimsPrincipal user,
+    FarmScopeService scopeSvc,
+    FarmManagementService farms,
+    CancellationToken ct) =>
+{
+    var access = await scopeSvc.LoadAsync(user, ct);
+    if (access == null) return Results.Unauthorized();
+    if (!access.FarmIds.Contains(id))
+        return Results.Json(new { ok = false, error = "farm not accessible" }, statusCode: 403);
+    try
+    {
+        var farm = await farms.UpdateAsync(access, id, body, ct);
+        return farm == null
+            ? Results.NotFound(new { ok = false, error = "farm not found" })
+            : Results.Json(new { ok = true, farm });
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        return Results.Json(new { ok = false, error = ex.Message }, statusCode: 403);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
+});
+
+dashboard.MapDelete("/farms/{id:guid}", async (
+    Guid id,
+    ClaimsPrincipal user,
+    FarmScopeService scopeSvc,
+    FarmManagementService farms,
+    CancellationToken ct) =>
+{
+    var access = await scopeSvc.LoadAsync(user, ct);
+    if (access == null) return Results.Unauthorized();
+    if (!access.FarmIds.Contains(id))
+        return Results.Json(new { ok = false, error = "farm not accessible" }, statusCode: 403);
+    try
+    {
+        var ok = await farms.DeleteAsync(access, id, ct);
+        return ok ? Results.NoContent() : Results.NotFound(new { ok = false, error = "farm not found" });
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        return Results.Json(new { ok = false, error = ex.Message }, statusCode: 403);
+    }
 });
 
 dashboard.MapGet("/devices/{mac}/shadow", async (

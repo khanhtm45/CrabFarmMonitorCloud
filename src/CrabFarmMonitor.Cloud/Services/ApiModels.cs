@@ -1,5 +1,11 @@
 namespace CrabFarmMonitor.Cloud.Services;
 
+public sealed record UpsertFarmRequest(
+    string Code,
+    string Name,
+    string? Address = null,
+    string? Description = null);
+
 public sealed record UpsertAreaRequest(string AreaCode, string AreaName, string? Description);
 
 public sealed record UpsertRowRequest(string RowCode, string RowName);
