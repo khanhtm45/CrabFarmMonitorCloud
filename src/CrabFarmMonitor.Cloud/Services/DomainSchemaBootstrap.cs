@@ -10,21 +10,21 @@ public static class DomainSchemaBootstrap
     {
         try
         {
-            var sqlPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "docs", "cloud_domain_schema.sql");
-            if (!File.Exists(sqlPath))
-            {
-                sqlPath = Path.GetFullPath(Path.Combine(
-                    Directory.GetCurrentDirectory(),
-                    "..", "..", "docs", "cloud_domain_schema.sql"));
-            }
-
-            foreach (var candidate in ResolveSqlPaths(sqlPath))
+            var applied = false;
+            foreach (var candidate in ResolveSqlPaths())
             {
                 if (!File.Exists(candidate)) continue;
                 var sql = await File.ReadAllTextAsync(candidate);
                 await db.Database.ExecuteSqlRawAsync(sql);
                 Console.WriteLine($"Domain schema: applied from {candidate}");
+                applied = true;
                 break;
+            }
+
+            if (!applied)
+            {
+                Console.WriteLine(
+                    "Domain schema: cloud_domain_schema.sql not found — run deploy/apply-managed-db-schema.ps1 or include database/ in publish.");
             }
 
             await db.Database.ExecuteSqlRawAsync(@"
@@ -49,11 +49,27 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;");
         }
     }
 
-    private static IEnumerable<string> ResolveSqlPaths(string primary)
+    private static IEnumerable<string> ResolveSqlPaths()
     {
-        yield return primary;
-        yield return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "docs", "cloud_domain_schema.sql"));
-        yield return Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "docs", "cloud_domain_schema.sql"));
-        yield return Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "..", "docs", "cloud_domain_schema.sql"));
+        const string fileName = "cloud_domain_schema.sql";
+
+        yield return Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory, "database", fileName));
+        yield return Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory, "docs", fileName));
+        yield return Path.GetFullPath(
+            Path.Combine(Directory.GetCurrentDirectory(), "database", fileName));
+        yield return Path.GetFullPath(
+            Path.Combine(Directory.GetCurrentDirectory(), "docs", fileName));
+
+        var dir = AppContext.BaseDirectory;
+        for (var i = 0; i < 6; i++)
+        {
+            yield return Path.GetFullPath(Path.Combine(dir, "database", fileName));
+            yield return Path.GetFullPath(Path.Combine(dir, "docs", fileName));
+            var parent = Directory.GetParent(dir);
+            if (parent is null) break;
+            dir = parent.FullName;
+        }
     }
 }

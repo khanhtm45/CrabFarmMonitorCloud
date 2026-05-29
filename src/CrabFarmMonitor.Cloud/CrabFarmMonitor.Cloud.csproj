@@ -16,6 +16,10 @@
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.2.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\..\database\cloud_domain_schema.sql" Link="database\cloud_domain_schema.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <PropertyGroup>
     
     <RootNamespace>CrabFarmMonitor.Cloud</RootNamespace>
