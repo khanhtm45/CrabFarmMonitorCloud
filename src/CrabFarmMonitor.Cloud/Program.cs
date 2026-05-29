@@ -126,30 +126,55 @@ bool CheckKey(HttpRequest req)
     return key == apiKey;
 }
 
-app.MapGet("/health", async (RasCloudDbContext db, CancellationToken ct) =>
+app.MapGet("/health", async (RasCloudDbContext db, IConfiguration config, CancellationToken ct) =>
 {
-    try
+    var configured = DatabaseConnection.IsConfigured(config);
+    if (!configured)
     {
-        var connected = await db.Database.CanConnectAsync(ct);
-        int? users = null;
-        if (connected)
-        {
-            try { users = await db.Users.CountAsync(ct); }
-            catch { users = -1; }
-        }
         return Results.Json(new
         {
-            ok = connected && users is >= 0,
+            ok = false,
             service = "ras-iot-cloud",
-            database = connected,
-            users,
-            hint = users == 0 ? "Chua co user — kiem tra DATABASE_URL va schema (deploy/apply-managed-db-schema.ps1)" : null
+            database = false,
+            configPresent = false,
+            hint = "App Platform: them DATABASE_URL (Settings -> Environment Variables) hoac Resources -> Add Database -> chon cluster PostgreSQL"
         });
     }
-    catch (Exception ex)
+
+    string? connectError = null;
+    var connected = false;
+    try { connected = await db.Database.CanConnectAsync(ct); }
+    catch (Exception ex) { connectError = ex.Message; }
+
+    int? users = null;
+    if (connected)
     {
-        return Results.Json(new { ok = false, service = "ras-iot-cloud", database = false, error = ex.Message }, statusCode: 503);
+        try { users = await db.Users.CountAsync(ct); }
+        catch { users = -1; }
     }
+
+    string? hint = null;
+    if (!connected)
+        hint = connectError?.Contains("timed out", StringComparison.OrdinalIgnoreCase) == true
+            || connectError?.Contains("refused", StringComparison.OrdinalIgnoreCase) == true
+            ? "Database -> Trusted sources: them App Platform hoac tam 'All'"
+            : "Kiem tra DATABASE_URL (password, host, port 25060) va Trusted sources";
+    else if (users == 0)
+        hint = "Chay .\\deploy\\apply-managed-db-schema.ps1 roi restart app";
+    else if (users == -1)
+        hint = "Thieu bang — chay apply-managed-db-schema.ps1";
+
+    return Results.Json(new
+    {
+        ok = connected && users is > 0,
+        service = "ras-iot-cloud",
+        configPresent = true,
+        database = connected,
+        users,
+        target = DatabaseConnection.Describe(config),
+        error = connectError,
+        hint
+    }, statusCode: connected ? 200 : 503);
 });
 
 app.MapGet("/metrics", (CloudMetricsCollector metrics) =>

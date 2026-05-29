@@ -1,3 +1,5 @@
+using Npgsql;
+
 namespace CrabFarmMonitor.Cloud.Configuration;
 
 /// <summary>
@@ -9,7 +11,7 @@ public static class DatabaseConnection
     {
         var fromConfig = config.GetConnectionString("Default");
         if (!string.IsNullOrWhiteSpace(fromConfig))
-            return fromConfig.Trim();
+            return Normalize(fromConfig.Trim());
 
         var databaseUrl = config["DATABASE_URL"]?.Trim();
         if (!string.IsNullOrWhiteSpace(databaseUrl))
@@ -18,27 +20,56 @@ public static class DatabaseConnection
         return "Host=localhost;Port=5432;Database=ras_cloud;Username=ras;Password=ras_dev_password";
     }
 
-    /// <summary>
-    /// Supports Npgsql key=value (Host=…;Port=…) and postgres:// URIs from DigitalOcean.
-    /// </summary>
+    public static bool IsConfigured(IConfiguration config) =>
+        !string.IsNullOrWhiteSpace(config["DATABASE_URL"])
+        || !string.IsNullOrWhiteSpace(config.GetConnectionString("Default"));
+
+    /// <summary>Host/database for /health — never includes password.</summary>
+    public static object Describe(IConfiguration config)
+    {
+        try
+        {
+            var b = new NpgsqlConnectionStringBuilder(Resolve(config));
+            return new { b.Host, b.Port, database = b.Database, username = b.Username, ssl = b.SslMode.ToString() };
+        }
+        catch (Exception ex)
+        {
+            return new { error = ex.Message };
+        }
+    }
+
+    /// <summary>Supports Npgsql key=value, postgres:// URIs (DigitalOcean).</summary>
     public static string Normalize(string value)
     {
-        if (value.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
-            || value.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
-        {
+        if (string.IsNullOrWhiteSpace(value))
             return value;
-        }
 
-        if (value.Contains('=') && value.Contains(';', StringComparison.Ordinal))
+        try
         {
-            if (!value.Contains("SSL Mode", StringComparison.OrdinalIgnoreCase)
-                && !value.Contains("Ssl Mode", StringComparison.OrdinalIgnoreCase))
+            var b = new NpgsqlConnectionStringBuilder(value);
+            var managed = b.Host?.Contains("ondigitalocean.com", StringComparison.OrdinalIgnoreCase) == true
+                || b.Host?.Contains("db.ondigitalocean.com", StringComparison.OrdinalIgnoreCase) == true;
+            if (managed)
             {
-                value += ";SSL Mode=Require;Trust Server Certificate=true";
+                b.SslMode = SslMode.Require;
+                b.TrustServerCertificate = true;
+            }
+            else if (b.SslMode == SslMode.Disable && value.Contains("SSL Mode=Require", StringComparison.OrdinalIgnoreCase))
+            {
+                b.SslMode = SslMode.Require;
+                b.TrustServerCertificate = true;
+            }
+            return b.ConnectionString;
+        }
+        catch
+        {
+            if (value.Contains('=') && value.Contains(';', StringComparison.Ordinal)
+                && !value.Contains("SSL Mode", StringComparison.OrdinalIgnoreCase)
+                && value.Contains("ondigitalocean", StringComparison.OrdinalIgnoreCase))
+            {
+                return value + ";SSL Mode=Require;Trust Server Certificate=true";
             }
             return value;
         }
-
-        return value;
     }
 }
