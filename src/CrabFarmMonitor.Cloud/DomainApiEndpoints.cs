@@ -53,6 +53,23 @@ public static class DomainApiEndpoints
             return Results.Json(new { ok = true, farmId = fid, areas });
         });
 
+        dashboard.MapGet("/areas/next-code", async (
+            Guid? farmId,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            FarmLayoutService layout,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var (fid, _, err) = scopeSvc.Resolve(access, farmId);
+            if (err != null) return Results.Json(new { ok = false, error = err }, statusCode: 403);
+            if (!fid.HasValue)
+                return Results.BadRequest(new { ok = false, error = "farmId required" });
+            var code = await layout.GenerateNextAreaCodeAsync(fid.Value, ct);
+            return Results.Json(new { ok = true, farmId = fid, code });
+        });
+
         dashboard.MapPost("/areas", async (
             Guid? farmId,
             UpsertAreaRequest body,
@@ -123,6 +140,23 @@ public static class DomainApiEndpoints
             return Results.Json(new { ok = true, areaId, rows });
         });
 
+        dashboard.MapGet("/areas/{areaId:guid}/rows/next-code", async (
+            Guid areaId,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            FarmLayoutService layout,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var area = await layout.GetAreaAsync(areaId, ct);
+            if (area == null) return Results.NotFound();
+            if (!access.FarmIds.Contains(area.FarmId))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var code = await layout.GenerateNextRowCodeAsync(areaId, ct);
+            return Results.Json(new { ok = true, areaId, code });
+        });
+
         dashboard.MapPost("/areas/{areaId:guid}/rows", async (
             Guid areaId,
             UpsertRowRequest body,
@@ -173,6 +207,261 @@ public static class DomainApiEndpoints
             if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
                 return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
             var ok = await layout.DeleteRowAsync(id, ct);
+            return ok ? Results.NoContent() : Results.NotFound();
+        });
+
+        dashboard.MapGet("/rows/{rowId:guid}/boxes", async (
+            Guid rowId,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            FarmLayoutService layout,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await layout.RowFarmIdAsync(rowId, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var boxes = await production.ListBoxesAsync(rowId, ct);
+            return Results.Json(new { ok = true, rowId, boxes });
+        });
+
+        dashboard.MapGet("/rows/{rowId:guid}/boxes/next-code", async (
+            Guid rowId,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            FarmLayoutService layout,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await layout.RowFarmIdAsync(rowId, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var code = await production.GenerateNextBoxCodeAsync(rowId, ct);
+            return Results.Json(new { ok = true, rowId, code });
+        });
+
+        dashboard.MapPost("/rows/{rowId:guid}/boxes", async (
+            Guid rowId,
+            UpsertBoxRequest body,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            FarmLayoutService layout,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await layout.RowFarmIdAsync(rowId, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var box = await production.CreateBoxAsync(rowId, body, ct);
+            return box == null
+                ? Results.NotFound()
+                : Results.Json(new { ok = true, box }, statusCode: StatusCodes.Status201Created);
+        });
+
+        dashboard.MapPut("/boxes/{id:guid}", async (
+            Guid id,
+            UpsertBoxRequest body,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await production.BoxFarmIdAsync(id, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var box = await production.UpdateBoxAsync(id, body, ct);
+            return box == null ? Results.NotFound() : Results.Json(new { ok = true, box });
+        });
+
+        dashboard.MapDelete("/boxes/{id:guid}", async (
+            Guid id,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await production.BoxFarmIdAsync(id, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var ok = await production.DeleteBoxAsync(id, ct);
+            return ok ? Results.NoContent() : Results.NotFound();
+        });
+
+        dashboard.MapGet("/boxes/{boxId:guid}/batches", async (
+            Guid boxId,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await production.BoxFarmIdAsync(boxId, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var batches = await production.ListBatchesAsync(boxId, ct);
+            return Results.Json(new { ok = true, boxId, batches });
+        });
+
+        dashboard.MapGet("/boxes/{boxId:guid}/batches/next-code", async (
+            Guid boxId,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await production.BoxFarmIdAsync(boxId, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var code = await production.GenerateNextBatchCodeAsync(boxId, ct);
+            return Results.Json(new { ok = true, boxId, code });
+        });
+
+        dashboard.MapPost("/boxes/{boxId:guid}/batches", async (
+            Guid boxId,
+            UpsertFarmingBatchRequest body,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await production.BoxFarmIdAsync(boxId, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var batch = await production.CreateBatchAsync(boxId, body, ct);
+            return batch == null
+                ? Results.NotFound()
+                : Results.Json(new { ok = true, batch }, statusCode: StatusCodes.Status201Created);
+        });
+
+        dashboard.MapPut("/farming-batches/{id:guid}", async (
+            Guid id,
+            UpsertFarmingBatchRequest body,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await production.BatchFarmIdAsync(id, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var batch = await production.UpdateBatchAsync(id, body, ct);
+            return batch == null ? Results.NotFound() : Results.Json(new { ok = true, batch });
+        });
+
+        dashboard.MapDelete("/farming-batches/{id:guid}", async (
+            Guid id,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await production.BatchFarmIdAsync(id, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var ok = await production.DeleteBatchAsync(id, ct);
+            return ok ? Results.NoContent() : Results.NotFound();
+        });
+
+        dashboard.MapGet("/farming-batches/{batchId:guid}/crabs", async (
+            Guid batchId,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await production.BatchFarmIdAsync(batchId, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var crabs = await production.ListBatchCrabsAsync(batchId, ct);
+            return Results.Json(new { ok = true, batchId, crabs });
+        });
+
+        dashboard.MapGet("/farming-batches/{batchId:guid}/crabs/next-code", async (
+            Guid batchId,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await production.BatchFarmIdAsync(batchId, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var code = await production.GenerateNextCrabCodeAsync(batchId, ct);
+            return Results.Json(new { ok = true, batchId, code });
+        });
+
+        dashboard.MapPost("/farming-batches/{batchId:guid}/crabs", async (
+            Guid batchId,
+            UpsertBatchCrabRequest body,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await production.BatchFarmIdAsync(batchId, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var crab = await production.CreateBatchCrabAsync(batchId, body, ct);
+            return crab == null
+                ? Results.NotFound()
+                : Results.Json(new { ok = true, crab }, statusCode: StatusCodes.Status201Created);
+        });
+
+        dashboard.MapPut("/batch-crabs/{id:guid}", async (
+            Guid id,
+            UpsertBatchCrabRequest body,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await production.BatchCrabFarmIdAsync(id, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var crab = await production.UpdateBatchCrabAsync(id, body, ct);
+            return crab == null ? Results.NotFound() : Results.Json(new { ok = true, crab });
+        });
+
+        dashboard.MapDelete("/batch-crabs/{id:guid}", async (
+            Guid id,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await production.BatchCrabFarmIdAsync(id, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var ok = await production.DeleteBatchCrabAsync(id, ct);
             return ok ? Results.NoContent() : Results.NotFound();
         });
 

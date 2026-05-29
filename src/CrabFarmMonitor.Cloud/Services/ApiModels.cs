@@ -6,9 +6,31 @@ public sealed record UpsertFarmRequest(
     string? Address = null,
     string? Description = null);
 
-public sealed record UpsertAreaRequest(string AreaCode, string AreaName, string? Description);
+public sealed record UpsertAreaRequest(string? AreaCode, string AreaName, string? Description);
 
-public sealed record UpsertRowRequest(string RowCode, string RowName);
+public sealed record UpsertRowRequest(string? RowCode, string RowName);
+
+public sealed record UpsertBoxRequest(
+    string? BoxCode,
+    string? Position = null,
+    double? Volume = null,
+    string Status = "empty");
+
+public sealed record UpsertFarmingBatchRequest(
+    string? BatchCode,
+    DateOnly StartDate,
+    DateOnly? ExpectedHarvestDate = null,
+    DateOnly? ActualHarvestDate = null,
+    int InitialQuantity = 0,
+    int CurrentQuantity = 0,
+    string Status = "active");
+
+public sealed record UpsertBatchCrabRequest(
+    string? CrabCode,
+    string Gender = "unknown",
+    double? Weight = null,
+    double? ShellWidth = null,
+    string Status = "alive");
 
 public sealed record UpsertWifiRequest(
     string Ssid,

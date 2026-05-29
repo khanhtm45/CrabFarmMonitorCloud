@@ -36,6 +36,7 @@ builder.Services.AddScoped<WaterAlertService>();
 builder.Services.AddScoped<DeviceShadowService>();
 builder.Services.AddScoped<SensorBatchSyncService>();
 builder.Services.AddScoped<FarmLayoutService>();
+builder.Services.AddScoped<ProductionService>();
 builder.Services.AddScoped<FarmManagementService>();
 builder.Services.AddScoped<DeviceConfigService>();
 builder.Services.AddScoped<CameraAiService>();
