@@ -164,12 +164,20 @@ public sealed class ProductionService
                where fb.Id == batchId
                select (Guid?)a.FarmId).FirstOrDefaultAsync(ct);
 
+    /// <summary>Mã BT- tăng theo cả dãy (tránh nhiều hộp cùng BT-1 khi xem theo dãy).</summary>
     public async Task<string> GenerateNextBatchCodeAsync(Guid boxId, CancellationToken ct)
     {
-        var codes = await _db.FarmingBatches.AsNoTracking()
-            .Where(b => b.BoxId == boxId)
-            .Select(b => b.BatchCode)
-            .ToListAsync(ct);
+        var rowId = await _db.Boxes.AsNoTracking()
+            .Where(b => b.Id == boxId)
+            .Select(b => (Guid?)b.RowId)
+            .FirstOrDefaultAsync(ct);
+        if (!rowId.HasValue)
+            return ProductionCodeGenerator.Next([], ProductionCodeGenerator.BatchPrefix);
+
+        var codes = await (from fb in _db.FarmingBatches.AsNoTracking()
+                           join bx in _db.Boxes on fb.BoxId equals bx.Id
+                           where bx.RowId == rowId.Value
+                           select fb.BatchCode).ToListAsync(ct);
         return ProductionCodeGenerator.Next(codes, ProductionCodeGenerator.BatchPrefix);
     }
 

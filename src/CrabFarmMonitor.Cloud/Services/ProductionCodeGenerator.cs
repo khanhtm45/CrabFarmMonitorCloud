@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace CrabFarmMonitor.Cloud.Services;
 
-/// <summary>Mã tự động theo cấp: K-1 (khu), D-1 (dãy), H-1 (hộp), BT-1 (đợt), C-1 (cua).</summary>
+/// <summary>Mã tự động theo cấp: K-1 (khu), D-1 (dãy), H-1 (hộp), BT-1 (đợt theo dãy), C-1 (cua theo đợt).</summary>
 public static class ProductionCodeGenerator
 {
     public const string AreaPrefix = "K";
