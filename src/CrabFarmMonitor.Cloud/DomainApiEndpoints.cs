@@ -326,6 +326,52 @@ public static class DomainApiEndpoints
             return ok ? Results.NoContent() : Results.NotFound();
         });
 
+        dashboard.MapGet("/rows/{rowId:guid}/batches", async (
+            Guid rowId,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            FarmLayoutService layout,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await layout.RowFarmIdAsync(rowId, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var batches = await production.ListBatchesByRowAsync(rowId, ct);
+            return Results.Json(new { ok = true, rowId, batches });
+        });
+
+        dashboard.MapPost("/rows/{rowId:guid}/batches/bulk", async (
+            Guid rowId,
+            BulkCreateBatchesRequest body,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            FarmLayoutService layout,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await layout.RowFarmIdAsync(rowId, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            if (body.BoxIds == null || body.BoxIds.Count == 0)
+                return Results.BadRequest(new { ok = false, error = "boxIds required" });
+            try
+            {
+                var batches = await production.CreateBatchesBulkAsync(body, ct);
+                return Results.Json(
+                    new { ok = true, count = batches.Count, batches },
+                    statusCode: StatusCodes.Status201Created);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ok = false, error = ex.Message });
+            }
+        });
+
         dashboard.MapGet("/boxes/{boxId:guid}/batches", async (
             Guid boxId,
             ClaimsPrincipal user,

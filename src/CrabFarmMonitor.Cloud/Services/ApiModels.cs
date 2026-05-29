@@ -29,7 +29,28 @@ public sealed record UpsertFarmingBatchRequest(
     DateOnly? ActualHarvestDate = null,
     int InitialQuantity = 0,
     int CurrentQuantity = 0,
+    string Status = "active",
+    bool StartNow = false);
+
+public sealed record BulkCreateBatchesRequest(
+    List<Guid> BoxIds,
+    DateOnly StartDate,
+    DateOnly? ExpectedHarvestDate = null,
+    int InitialQuantity = 0,
+    bool StartNow = true,
     string Status = "active");
+
+public sealed record FarmingBatchListItem(
+    Guid Id,
+    Guid BoxId,
+    string BoxCode,
+    string BatchCode,
+    DateOnly StartDate,
+    DateOnly? ExpectedHarvestDate,
+    DateOnly? ActualHarvestDate,
+    int InitialQuantity,
+    int CurrentQuantity,
+    string Status);
 
 public sealed record UpsertBatchCrabRequest(
     string? CrabCode,

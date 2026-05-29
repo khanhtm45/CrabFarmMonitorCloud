@@ -135,6 +135,24 @@ public sealed class ProductionService
             .ThenBy(b => b.BatchCode)
             .ToListAsync(ct);
 
+    public async Task<List<FarmingBatchListItem>> ListBatchesByRowAsync(Guid rowId, CancellationToken ct) =>
+        await (from fb in _db.FarmingBatches.AsNoTracking()
+               join bx in _db.Boxes on fb.BoxId equals bx.Id
+               where bx.RowId == rowId
+               orderby fb.StartDate descending, fb.BatchCode
+               select new FarmingBatchListItem(
+                   fb.Id,
+                   fb.BoxId,
+                   bx.BoxCode,
+                   fb.BatchCode,
+                   fb.StartDate,
+                   fb.ExpectedHarvestDate,
+                   fb.ActualHarvestDate,
+                   fb.InitialQuantity,
+                   fb.CurrentQuantity,
+                   fb.Status))
+            .ToListAsync(ct);
+
     public async Task<FarmingBatch?> GetBatchAsync(Guid batchId, CancellationToken ct) =>
         await _db.FarmingBatches.AsNoTracking().FirstOrDefaultAsync(b => b.Id == batchId, ct);
 
@@ -164,12 +182,16 @@ public sealed class ProductionService
             ? await GenerateNextBatchCodeAsync(boxId, ct)
             : req.BatchCode.Trim();
 
+        var startDate = req.StartNow
+            ? DateOnly.FromDateTime(DateTime.UtcNow)
+            : req.StartDate;
+
         var batch = new FarmingBatch
         {
             Id = Guid.NewGuid(),
             BoxId = boxId,
             BatchCode = code,
-            StartDate = req.StartDate,
+            StartDate = startDate,
             ExpectedHarvestDate = req.ExpectedHarvestDate,
             ActualHarvestDate = req.ActualHarvestDate,
             InitialQuantity = req.InitialQuantity,
@@ -177,8 +199,45 @@ public sealed class ProductionService
             Status = string.IsNullOrWhiteSpace(req.Status) ? "active" : req.Status.Trim().ToLowerInvariant()
         };
         _db.FarmingBatches.Add(batch);
+        await ApplyBoxStatusForBatchAsync(boxId, batch.Status, startDate, req.StartNow, ct);
         await _db.SaveChangesAsync(ct);
         return batch;
+    }
+
+    public async Task<List<FarmingBatch>> CreateBatchesBulkAsync(
+        BulkCreateBatchesRequest req,
+        CancellationToken ct)
+    {
+        if (req.BoxIds == null || req.BoxIds.Count == 0)
+            throw new ArgumentException("boxIds required");
+        if (req.BoxIds.Count > 100)
+            throw new ArgumentException("tối đa 100 hộp mỗi lần");
+
+        var status = string.IsNullOrWhiteSpace(req.Status)
+            ? "active"
+            : req.Status.Trim().ToLowerInvariant();
+        var created = new List<FarmingBatch>();
+
+        foreach (var boxId in req.BoxIds.Distinct())
+        {
+            if (!await _db.Boxes.AnyAsync(b => b.Id == boxId, ct))
+                continue;
+
+            var single = new UpsertFarmingBatchRequest(
+                BatchCode: null,
+                StartDate: req.StartDate,
+                ExpectedHarvestDate: req.ExpectedHarvestDate,
+                InitialQuantity: req.InitialQuantity,
+                CurrentQuantity: req.InitialQuantity,
+                Status: status,
+                StartNow: req.StartNow);
+
+            var batch = await CreateBatchAsync(boxId, single, ct);
+            if (batch != null)
+                created.Add(batch);
+        }
+
+        return created;
     }
 
     public async Task<FarmingBatch?> UpdateBatchAsync(Guid batchId, UpsertFarmingBatchRequest req, CancellationToken ct)
@@ -187,16 +246,48 @@ public sealed class ProductionService
         if (batch == null) return null;
         if (!string.IsNullOrWhiteSpace(req.BatchCode))
             batch.BatchCode = req.BatchCode.Trim();
-        batch.StartDate = req.StartDate;
+        if (req.StartNow)
+            batch.StartDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        else
+            batch.StartDate = req.StartDate;
         batch.ExpectedHarvestDate = req.ExpectedHarvestDate;
         batch.ActualHarvestDate = req.ActualHarvestDate;
         batch.InitialQuantity = req.InitialQuantity;
         batch.CurrentQuantity = req.CurrentQuantity;
         if (!string.IsNullOrWhiteSpace(req.Status))
             batch.Status = req.Status.Trim().ToLowerInvariant();
+        await ApplyBoxStatusForBatchAsync(batch.BoxId, batch.Status, batch.StartDate, req.StartNow, ct);
         await _db.SaveChangesAsync(ct);
         return batch;
     }
+
+    static async Task ApplyBoxStatusForBatchAsync(
+        RasCloudDbContext db,
+        Guid boxId,
+        string batchStatus,
+        DateOnly startDate,
+        bool startNow,
+        CancellationToken ct)
+    {
+        var box = await db.Boxes.FirstOrDefaultAsync(b => b.Id == boxId, ct);
+        if (box == null) return;
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        box.Status = batchStatus switch
+        {
+            "harvested" or "failed" => "empty",
+            "active" when startNow || startDate <= today => "farming",
+            _ => box.Status
+        };
+    }
+
+    async Task ApplyBoxStatusForBatchAsync(
+        Guid boxId,
+        string batchStatus,
+        DateOnly startDate,
+        bool startNow,
+        CancellationToken ct) =>
+        await ApplyBoxStatusForBatchAsync(_db, boxId, batchStatus, startDate, startNow, ct);
 
     public async Task<bool> DeleteBatchAsync(Guid batchId, CancellationToken ct)
     {
