@@ -16,6 +16,12 @@ public sealed record UpsertBoxRequest(
     double? Volume = null,
     string Status = "empty");
 
+public sealed record BulkCreateBoxesRequest(
+    int Count,
+    string? PositionPrefix = null,
+    double? Volume = null,
+    string Status = "empty");
+
 public sealed record UpsertFarmingBatchRequest(
     string? BatchCode,
     DateOnly StartDate,

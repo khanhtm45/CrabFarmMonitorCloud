@@ -58,6 +58,53 @@ public sealed class ProductionService
         return box;
     }
 
+    public async Task<List<Box>> CreateBoxesBulkAsync(
+        Guid rowId,
+        BulkCreateBoxesRequest req,
+        CancellationToken ct)
+    {
+        if (!await _db.Rows.AnyAsync(r => r.Id == rowId, ct))
+            return [];
+
+        if (req.Count is < 1 or > 100)
+            throw new ArgumentException("count phải từ 1 đến 100");
+
+        var codes = await _db.Boxes.AsNoTracking()
+            .Where(b => b.RowId == rowId)
+            .Select(b => b.BoxCode)
+            .ToListAsync(ct);
+
+        var status = string.IsNullOrWhiteSpace(req.Status)
+            ? "empty"
+            : req.Status.Trim().ToLowerInvariant();
+        var prefix = req.PositionPrefix?.Trim();
+        var created = new List<Box>(req.Count);
+
+        for (var i = 0; i < req.Count; i++)
+        {
+            var code = ProductionCodeGenerator.Next(codes, ProductionCodeGenerator.BoxPrefix);
+            codes.Add(code);
+
+            string? position = null;
+            if (!string.IsNullOrEmpty(prefix))
+                position = req.Count == 1 ? prefix : $"{prefix}-{i + 1}";
+
+            created.Add(new Box
+            {
+                Id = Guid.NewGuid(),
+                RowId = rowId,
+                BoxCode = code,
+                Position = position,
+                Volume = req.Volume,
+                Status = status
+            });
+        }
+
+        _db.Boxes.AddRange(created);
+        await _db.SaveChangesAsync(ct);
+        return created;
+    }
+
     public async Task<Box?> UpdateBoxAsync(Guid boxId, UpsertBoxRequest req, CancellationToken ct)
     {
         var box = await _db.Boxes.FirstOrDefaultAsync(b => b.Id == boxId, ct);

@@ -264,6 +264,35 @@ public static class DomainApiEndpoints
                 : Results.Json(new { ok = true, box }, statusCode: StatusCodes.Status201Created);
         });
 
+        dashboard.MapPost("/rows/{rowId:guid}/boxes/bulk", async (
+            Guid rowId,
+            BulkCreateBoxesRequest body,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            FarmLayoutService layout,
+            ProductionService production,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var farmId = await layout.RowFarmIdAsync(rowId, ct);
+            if (!farmId.HasValue || !access.FarmIds.Contains(farmId.Value))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            try
+            {
+                var boxes = await production.CreateBoxesBulkAsync(rowId, body, ct);
+                if (boxes.Count == 0)
+                    return Results.NotFound();
+                return Results.Json(
+                    new { ok = true, count = boxes.Count, boxes },
+                    statusCode: StatusCodes.Status201Created);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ok = false, error = ex.Message });
+            }
+        });
+
         dashboard.MapPut("/boxes/{id:guid}", async (
             Guid id,
             UpsertBoxRequest body,
