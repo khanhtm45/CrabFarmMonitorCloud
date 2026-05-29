@@ -9,6 +9,10 @@ public static class DatabaseConnection
 {
     public static string Resolve(IConfiguration config)
     {
+        var fromParts = BuildFromDiscreteParts(config);
+        if (!string.IsNullOrWhiteSpace(fromParts))
+            return Normalize(fromParts);
+
         var fromConfig = config.GetConnectionString("Default");
         if (!string.IsNullOrWhiteSpace(fromConfig))
             return Normalize(fromConfig.Trim());
@@ -22,7 +26,8 @@ public static class DatabaseConnection
 
     public static bool IsConfigured(IConfiguration config) =>
         !string.IsNullOrWhiteSpace(config["DATABASE_URL"])
-        || !string.IsNullOrWhiteSpace(config.GetConnectionString("Default"));
+        || !string.IsNullOrWhiteSpace(config.GetConnectionString("Default"))
+        || !string.IsNullOrWhiteSpace(BuildFromDiscreteParts(config));
 
     /// <summary>Host/database for /health — never includes password.</summary>
     public static object Describe(IConfiguration config)
@@ -49,16 +54,8 @@ public static class DatabaseConnection
             var b = new NpgsqlConnectionStringBuilder(value);
             var managed = b.Host?.Contains("ondigitalocean.com", StringComparison.OrdinalIgnoreCase) == true
                 || b.Host?.Contains("db.ondigitalocean.com", StringComparison.OrdinalIgnoreCase) == true;
-            if (managed)
-            {
+            if (managed || (b.SslMode == SslMode.Disable && value.Contains("SSL Mode=Require", StringComparison.OrdinalIgnoreCase)))
                 b.SslMode = SslMode.Require;
-                b.TrustServerCertificate = true;
-            }
-            else if (b.SslMode == SslMode.Disable && value.Contains("SSL Mode=Require", StringComparison.OrdinalIgnoreCase))
-            {
-                b.SslMode = SslMode.Require;
-                b.TrustServerCertificate = true;
-            }
             return b.ConnectionString;
         }
         catch
@@ -71,5 +68,44 @@ public static class DatabaseConnection
             }
             return value;
         }
+    }
+
+    private static string? BuildFromDiscreteParts(IConfiguration config)
+    {
+        // Supports either lowercase keys (host, port, ...) or DB_* style.
+        var host = First(config, "host", "db_host");
+        var port = First(config, "port", "db_port");
+        var database = First(config, "database", "db_name");
+        var username = First(config, "username", "db_user");
+        var password = First(config, "password", "db_password");
+        var sslmode = First(config, "sslmode", "db_sslmode");
+
+        if (string.IsNullOrWhiteSpace(host)
+            || string.IsNullOrWhiteSpace(database)
+            || string.IsNullOrWhiteSpace(username))
+            return null;
+
+        var b = new NpgsqlConnectionStringBuilder
+        {
+            Host = host,
+            Port = int.TryParse(port, out var p) ? p : 5432,
+            Database = database,
+            Username = username,
+            Password = password ?? string.Empty
+        };
+        if (!string.IsNullOrWhiteSpace(sslmode) && Enum.TryParse<SslMode>(sslmode, true, out var ssl))
+            b.SslMode = ssl;
+        return b.ConnectionString;
+    }
+
+    private static string? First(IConfiguration config, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            var value = config[key];
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim();
+        }
+        return null;
     }
 }
