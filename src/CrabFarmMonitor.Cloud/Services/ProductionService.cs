@@ -201,10 +201,10 @@ public sealed class ProductionService
         _db.FarmingBatches.Add(batch);
         await ApplyBoxStatusForBatchAsync(boxId, batch.Status, startDate, req.StartNow, ct);
         await _db.SaveChangesAsync(ct);
-        return batch;
+        return await GetBatchDetachedAsync(batch.Id, ct);
     }
 
-    public async Task<List<FarmingBatch>> CreateBatchesBulkAsync(
+    public async Task<List<FarmingBatchListItem>> CreateBatchesBulkAsync(
         BulkCreateBatchesRequest req,
         CancellationToken ct)
     {
@@ -216,7 +216,7 @@ public sealed class ProductionService
         var status = string.IsNullOrWhiteSpace(req.Status)
             ? "active"
             : req.Status.Trim().ToLowerInvariant();
-        var created = new List<FarmingBatch>();
+        var createdIds = new List<Guid>();
 
         foreach (var boxId in req.BoxIds.Distinct())
         {
@@ -234,11 +234,37 @@ public sealed class ProductionService
 
             var batch = await CreateBatchAsync(boxId, single, ct);
             if (batch != null)
-                created.Add(batch);
+                createdIds.Add(batch.Id);
         }
 
-        return created;
+        if (createdIds.Count == 0)
+            return [];
+
+        return await ListBatchItemsByIdsAsync(createdIds, ct);
     }
+
+    async Task<FarmingBatch?> GetBatchDetachedAsync(Guid batchId, CancellationToken ct) =>
+        await _db.FarmingBatches.AsNoTracking().FirstOrDefaultAsync(b => b.Id == batchId, ct);
+
+    async Task<List<FarmingBatchListItem>> ListBatchItemsByIdsAsync(
+        IReadOnlyList<Guid> batchIds,
+        CancellationToken ct) =>
+        await (from fb in _db.FarmingBatches.AsNoTracking()
+               join bx in _db.Boxes on fb.BoxId equals bx.Id
+               where batchIds.Contains(fb.Id)
+               orderby fb.StartDate descending, fb.BatchCode
+               select new FarmingBatchListItem(
+                   fb.Id,
+                   fb.BoxId,
+                   bx.BoxCode,
+                   fb.BatchCode,
+                   fb.StartDate,
+                   fb.ExpectedHarvestDate,
+                   fb.ActualHarvestDate,
+                   fb.InitialQuantity,
+                   fb.CurrentQuantity,
+                   fb.Status))
+            .ToListAsync(ct);
 
     public async Task<FarmingBatch?> UpdateBatchAsync(Guid batchId, UpsertFarmingBatchRequest req, CancellationToken ct)
     {
@@ -258,7 +284,7 @@ public sealed class ProductionService
             batch.Status = req.Status.Trim().ToLowerInvariant();
         await ApplyBoxStatusForBatchAsync(batch.BoxId, batch.Status, batch.StartDate, req.StartNow, ct);
         await _db.SaveChangesAsync(ct);
-        return batch;
+        return await GetBatchDetachedAsync(batch.Id, ct);
     }
 
     static async Task ApplyBoxStatusForBatchAsync(
@@ -269,16 +295,17 @@ public sealed class ProductionService
         bool startNow,
         CancellationToken ct)
     {
-        var box = await db.Boxes.FirstOrDefaultAsync(b => b.Id == boxId, ct);
-        if (box == null) return;
-
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        box.Status = batchStatus switch
+        var newStatus = batchStatus switch
         {
             "harvested" or "failed" => "empty",
             "active" when startNow || startDate <= today => "farming",
-            _ => box.Status
+            _ => null
         };
+        if (newStatus == null) return;
+
+        await db.Boxes.Where(b => b.Id == boxId)
+            .ExecuteUpdateAsync(s => s.SetProperty(b => b.Status, newStatus), ct);
     }
 
     async Task ApplyBoxStatusForBatchAsync(
