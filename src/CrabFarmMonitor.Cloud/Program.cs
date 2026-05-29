@@ -11,6 +11,8 @@ using CrabFarmMonitor.Cloud.Data.Entities;
 using CrabFarmMonitor.Cloud.Services;
 using CrabFarmMonitor.Shared;
 
+EnvFileLoader.LoadFromRepoRoot();
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 128 * 1024 * 1024);
