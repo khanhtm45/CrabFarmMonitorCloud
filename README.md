@@ -58,15 +58,17 @@ Health: `http://localhost:8080/health`
 
 6. Thêm secrets: `JWT_SECRET`, `TELEMETRY_API_KEY`, `DEV_ADMIN_PASSWORD`.
 7. (Khuyến nghị) **Spaces** cho HDF5: `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_USE_SSL=true`.
-8. Deploy → URL dạng `https://crab-farm-cloud-xxxxx.ondigitalocean.app`.
+8. Deploy → **https://crabfarmmonitorcloud-uwkqk.ondigitalocean.app**
 
 Cấu hình Edge/VPS trỏ sync:
 
 ```env
-EDGE_REMOTE_SYNC_URL=https://<app-url>/api/sync/hdf5
+EDGE_REMOTE_SYNC_URL=https://crabfarmmonitorcloud-uwkqk.ondigitalocean.app/api/sync/hdf5
 EDGE_REMOTE_SYNC_API_KEY=<same as TELEMETRY_API_KEY>
 EDGE_CLOUD_FARM_ID=11111111-1111-1111-1111-111111111111
 ```
+
+Desktop: `CLOUD_API_URL=https://crabfarmmonitorcloud-uwkqk.ondigitalocean.app`
 
 ## Biến môi trường
 

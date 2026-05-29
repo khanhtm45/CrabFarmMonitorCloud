@@ -21,8 +21,15 @@ public sealed class AuthService
             .FirstOrDefaultAsync(u => u.Email.ToLower() == norm && u.IsActive, ct);
         if (user == null || string.IsNullOrEmpty(user.PasswordHash))
             return null;
-        if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
+        try
+        {
+            if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
+                return null;
+        }
+        catch
+        {
             return null;
+        }
 
         return new
         {

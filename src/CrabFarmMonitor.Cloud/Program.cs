@@ -45,7 +45,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidAudience = "ras-dashboard",
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
+            IssuerSigningKey = new SymmetricSecurityKey(JwtTokenService.DeriveSigningKey(jwtSecret)),
             ValidateLifetime = true
         };
     });
@@ -126,7 +126,31 @@ bool CheckKey(HttpRequest req)
     return key == apiKey;
 }
 
-app.MapGet("/health", () => Results.Json(new { ok = true, service = "ras-iot-cloud" }));
+app.MapGet("/health", async (RasCloudDbContext db, CancellationToken ct) =>
+{
+    try
+    {
+        var connected = await db.Database.CanConnectAsync(ct);
+        int? users = null;
+        if (connected)
+        {
+            try { users = await db.Users.CountAsync(ct); }
+            catch { users = -1; }
+        }
+        return Results.Json(new
+        {
+            ok = connected && users is >= 0,
+            service = "ras-iot-cloud",
+            database = connected,
+            users,
+            hint = users == 0 ? "Chua co user — kiem tra DATABASE_URL va schema (deploy/apply-managed-db-schema.ps1)" : null
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { ok = false, service = "ras-iot-cloud", database = false, error = ex.Message }, statusCode: 503);
+    }
+});
 
 app.MapGet("/metrics", (CloudMetricsCollector metrics) =>
     Results.Text(metrics.RenderPrometheus(), "text/plain; version=0.0.4"));
@@ -157,10 +181,24 @@ app.MapPost("/api/auth/login", async (LoginRequest body, AuthService auth, Cance
 {
     if (string.IsNullOrWhiteSpace(body.Email) || string.IsNullOrWhiteSpace(body.Password))
         return Results.BadRequest(new { ok = false, error = "email and password required" });
-    var result = await auth.LoginAsync(body.Email, body.Password, ct);
-    return result == null
-        ? Results.Json(new { ok = false, error = "invalid credentials" }, statusCode: 401)
-        : Results.Json(result);
+    try
+    {
+        var result = await auth.LoginAsync(body.Email, body.Password, ct);
+        return result == null
+            ? Results.Json(new { ok = false, error = "invalid credentials" }, statusCode: 401)
+            : Results.Json(result);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[auth/login] {ex}");
+        return Results.Json(new
+        {
+            ok = false,
+            error = "login failed",
+            detail = ex.Message,
+            hint = "Kiem tra DATABASE_URL, schema SQL, JWT_SECRET (>= 16 ky tu) tren App Platform"
+        }, statusCode: 500);
+    }
 });
 
 app.MapGet("/api/auth/me", async (ClaimsPrincipal user, RasCloudDbContext db, FarmScopeService scope, CancellationToken ct) =>
