@@ -649,8 +649,21 @@ app.MapGet("/api/telemetry/latest", async (Guid? farmId, string? mac, RasCloudDb
     return Results.Json(new { ok = true, data = rows });
 });
 
-var port = builder.Configuration["PORT"] ?? "8080";
-Console.WriteLine($"RAS Cloud listening on 0.0.0.0:{port}");
-app.Run($"http://0.0.0.0:{port}");
+var httpPort = ResolveHttpPort(builder.Configuration);
+Console.WriteLine($"RAS Cloud listening on 0.0.0.0:{httpPort}");
+app.Run($"http://0.0.0.0:{httpPort}");
+
+static string ResolveHttpPort(IConfiguration config)
+{
+    var httpPort = config["HTTP_PORT"]?.Trim();
+    if (!string.IsNullOrEmpty(httpPort)) return httpPort;
+
+    var port = config["PORT"]?.Trim();
+    // Bare "port" env for Postgres (25060) must not become Kestrel port on App Platform.
+    if (!string.IsNullOrEmpty(port) && port is not ("25060" or "5432"))
+        return port;
+
+    return "8080";
+}
 
 record LoginRequest(string Email, string Password);

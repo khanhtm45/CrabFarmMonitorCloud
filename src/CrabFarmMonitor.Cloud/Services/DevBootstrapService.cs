@@ -15,6 +15,7 @@ public static class DevBootstrapService
         {
             org = new Organization { Id = Guid.NewGuid(), Name = "IRAS Demo", Slug = "iras-demo" };
             db.Organizations.Add(org);
+            await db.SaveChangesAsync();
         }
 
         var farmId = Guid.Parse(config["DEFAULT_FARM_ID"] ?? "11111111-1111-1111-1111-111111111111");
@@ -28,6 +29,7 @@ public static class DevBootstrapService
                 Name = "Local Dev Farm",
                 CreatedAt = DateTime.UtcNow
             });
+            await db.SaveChangesAsync();
         }
 
         var adminEmail = config["DEV_ADMIN_EMAIL"] ?? "admin@iras.local";

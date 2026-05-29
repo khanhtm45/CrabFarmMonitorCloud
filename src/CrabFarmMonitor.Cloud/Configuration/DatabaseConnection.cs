@@ -72,13 +72,13 @@ public static class DatabaseConnection
 
     private static string? BuildFromDiscreteParts(IConfiguration config)
     {
-        // Supports either lowercase keys (host, port, ...) or DB_* style.
-        var host = First(config, "host", "db_host");
-        var port = First(config, "port", "db_port");
-        var database = First(config, "database", "db_name");
-        var username = First(config, "username", "db_user");
-        var password = First(config, "password", "db_password");
-        var sslmode = First(config, "sslmode", "db_sslmode");
+        // Use DB_* / POSTGRES_* only — do NOT use bare "port" (conflicts with App Platform HTTP PORT).
+        var host = First(config, "DB_HOST", "POSTGRES_HOST", "db_host");
+        var port = First(config, "DB_PORT", "POSTGRES_PORT", "db_port");
+        var database = First(config, "DB_NAME", "POSTGRES_DB", "db_name", "database");
+        var username = First(config, "DB_USER", "POSTGRES_USER", "db_user", "username");
+        var password = First(config, "DB_PASSWORD", "POSTGRES_PASSWORD", "db_password", "password");
+        var sslmode = First(config, "DB_SSLMODE", "POSTGRES_SSLMODE", "db_sslmode", "sslmode");
 
         if (string.IsNullOrWhiteSpace(host)
             || string.IsNullOrWhiteSpace(database)
