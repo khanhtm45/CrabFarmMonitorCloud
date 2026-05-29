@@ -174,7 +174,7 @@ app.MapGet("/health", async (RasCloudDbContext db, IConfiguration config, Cancel
         target = DatabaseConnection.Describe(config),
         error = connectError,
         hint
-    }, statusCode: connected ? 200 : 503);
+    });
 });
 
 app.MapGet("/metrics", (CloudMetricsCollector metrics) =>
