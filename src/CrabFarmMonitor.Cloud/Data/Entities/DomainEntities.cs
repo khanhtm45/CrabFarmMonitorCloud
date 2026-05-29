@@ -7,6 +7,8 @@ public class Area
     public string AreaCode { get; set; } = "";
     public string AreaName { get; set; } = "";
     public string? Description { get; set; }
+    public string Status { get; set; } = "active";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public Farm? Farm { get; set; }
     public List<Row> Rows { get; set; } = new();
 }

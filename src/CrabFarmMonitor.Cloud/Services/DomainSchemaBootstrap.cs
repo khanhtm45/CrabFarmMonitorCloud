@@ -28,6 +28,8 @@ public static class DomainSchemaBootstrap
             }
 
             await db.Database.ExecuteSqlRawAsync(@"
+ALTER TABLE areas ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE areas ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE farms ADD COLUMN IF NOT EXISTS address TEXT;
 ALTER TABLE farms ADD COLUMN IF NOT EXISTS owner_id UUID;
 ALTER TABLE farms ADD COLUMN IF NOT EXISTS description TEXT;

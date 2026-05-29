@@ -16,8 +16,93 @@ public sealed class FarmLayoutService
             .OrderBy(a => a.AreaCode)
             .ToListAsync(ct);
 
+    public async Task<List<AreaListItem>> ListAreasWithStatsAsync(Guid farmId, CancellationToken ct)
+    {
+        var areas = await ListAreasAsync(farmId, ct);
+        if (areas.Count == 0) return [];
+
+        var areaIds = areas.Select(a => a.Id).ToList();
+
+        var rowCounts = await _db.Rows.AsNoTracking()
+            .Where(r => areaIds.Contains(r.AreaId))
+            .GroupBy(r => r.AreaId)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+
+        var boxCounts = await (
+                from b in _db.Boxes.AsNoTracking()
+                join r in _db.Rows on b.RowId equals r.Id
+                where areaIds.Contains(r.AreaId)
+                group b by r.AreaId
+                into g
+                select new { AreaId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.AreaId, x => x.Count, ct);
+
+        return areas.Select(a => new AreaListItem(
+            a.Id,
+            a.FarmId,
+            a.AreaCode,
+            a.AreaName,
+            a.Description,
+            NormalizeAreaStatus(a.Status),
+            a.CreatedAt,
+            rowCounts.GetValueOrDefault(a.Id),
+            boxCounts.GetValueOrDefault(a.Id))).ToList();
+    }
+
+    public async Task<AreaDetailStats?> GetAreaDetailStatsAsync(Guid areaId, CancellationToken ct)
+    {
+        var area = await GetAreaAsync(areaId, ct);
+        if (area == null) return null;
+
+        var rowCount = await _db.Rows.AsNoTracking().CountAsync(r => r.AreaId == areaId, ct);
+        var boxIds = await (
+            from b in _db.Boxes.AsNoTracking()
+            join r in _db.Rows on b.RowId equals r.Id
+            where r.AreaId == areaId
+            select b.Id).ToListAsync(ct);
+
+        var esp32Count = boxIds.Count == 0
+            ? 0
+            : await _db.Devices.AsNoTracking()
+                .CountAsync(d => d.BoxId != null && boxIds.Contains(d.BoxId.Value), ct);
+
+        var cameraCount = boxIds.Count == 0
+            ? 0
+            : await _db.CameraDevices.AsNoTracking()
+                .CountAsync(c => c.BoxId != null && boxIds.Contains(c.BoxId.Value), ct);
+
+        return new AreaDetailStats(
+            area.Id,
+            area.FarmId,
+            area.AreaCode,
+            area.AreaName,
+            area.Description,
+            NormalizeAreaStatus(area.Status),
+            area.CreatedAt,
+            rowCount,
+            boxIds.Count,
+            esp32Count,
+            cameraCount);
+    }
+
+    public async Task<List<Box>> ListBoxesByAreaAsync(Guid areaId, CancellationToken ct) =>
+        await (
+            from b in _db.Boxes.AsNoTracking()
+            join r in _db.Rows on b.RowId equals r.Id
+            where r.AreaId == areaId
+            orderby b.BoxCode
+            select b).ToListAsync(ct);
+
     public async Task<Area?> GetAreaAsync(Guid areaId, CancellationToken ct) =>
         await _db.Areas.AsNoTracking().FirstOrDefaultAsync(a => a.Id == areaId, ct);
+
+    static string NormalizeAreaStatus(string? status) => status?.Trim().ToLowerInvariant() switch
+    {
+        "maintenance" => "maintenance",
+        "disabled" or "inactive" => "disabled",
+        _ => "active"
+    };
 
     public async Task<string> GenerateNextAreaCodeAsync(Guid farmId, CancellationToken ct)
     {
@@ -43,7 +128,9 @@ public sealed class FarmLayoutService
             FarmId = farmId,
             AreaCode = code,
             AreaName = req.AreaName.Trim(),
-            Description = req.Description?.Trim()
+            Description = req.Description?.Trim(),
+            Status = NormalizeAreaStatus(req.Status),
+            CreatedAt = DateTime.UtcNow
         };
         _db.Areas.Add(area);
         await _db.SaveChangesAsync(ct);
@@ -58,6 +145,8 @@ public sealed class FarmLayoutService
             area.AreaCode = req.AreaCode.Trim();
         area.AreaName = req.AreaName.Trim();
         area.Description = req.Description?.Trim();
+        if (!string.IsNullOrWhiteSpace(req.Status))
+            area.Status = NormalizeAreaStatus(req.Status);
         await _db.SaveChangesAsync(ct);
         return area;
     }

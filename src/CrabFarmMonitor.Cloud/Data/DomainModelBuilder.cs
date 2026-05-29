@@ -16,6 +16,8 @@ public static class DomainModelBuilder
             e.Property(x => x.AreaCode).HasColumnName("area_code");
             e.Property(x => x.AreaName).HasColumnName("area_name");
             e.Property(x => x.Description).HasColumnName("description");
+            e.Property(x => x.Status).HasColumnName("status");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.HasIndex(x => new { x.FarmId, x.AreaCode }).IsUnique();
         });
 

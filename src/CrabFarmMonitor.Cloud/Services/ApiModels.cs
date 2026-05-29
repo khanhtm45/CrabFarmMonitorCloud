@@ -6,7 +6,35 @@ public sealed record UpsertFarmRequest(
     string? Address = null,
     string? Description = null);
 
-public sealed record UpsertAreaRequest(string? AreaCode, string AreaName, string? Description);
+public sealed record UpsertAreaRequest(
+    string? AreaCode,
+    string AreaName,
+    string? Description,
+    string Status = "active");
+
+public sealed record AreaListItem(
+    Guid Id,
+    Guid FarmId,
+    string AreaCode,
+    string AreaName,
+    string? Description,
+    string Status,
+    DateTime CreatedAt,
+    int RowCount,
+    int BoxCount);
+
+public sealed record AreaDetailStats(
+    Guid Id,
+    Guid FarmId,
+    string AreaCode,
+    string AreaName,
+    string? Description,
+    string Status,
+    DateTime CreatedAt,
+    int RowCount,
+    int BoxCount,
+    int Esp32Count,
+    int CameraCount);
 
 public sealed record UpsertRowRequest(string? RowCode, string RowName);
 

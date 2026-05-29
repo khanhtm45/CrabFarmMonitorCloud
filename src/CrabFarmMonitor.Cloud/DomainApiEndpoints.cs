@@ -49,8 +49,35 @@ public static class DomainApiEndpoints
             if (err != null) return Results.Json(new { ok = false, error = err }, statusCode: 403);
             if (!fid.HasValue)
                 return Results.BadRequest(new { ok = false, error = "farmId required" });
-            var areas = await layout.ListAreasAsync(fid.Value, ct);
-            return Results.Json(new { ok = true, farmId = fid, areas });
+            var areas = await layout.ListAreasWithStatsAsync(fid.Value, ct);
+            var summary = new
+            {
+                total = areas.Count,
+                active = areas.Count(a => a.Status == "active"),
+                maintenance = areas.Count(a => a.Status == "maintenance"),
+                disabled = areas.Count(a => a.Status == "disabled"),
+                totalBoxes = areas.Sum(a => a.BoxCount)
+            };
+            return Results.Json(new { ok = true, farmId = fid, areas, summary });
+        });
+
+        dashboard.MapGet("/areas/{id:guid}/detail", async (
+            Guid id,
+            ClaimsPrincipal user,
+            FarmScopeService scopeSvc,
+            FarmLayoutService layout,
+            CancellationToken ct) =>
+        {
+            var access = await scopeSvc.LoadAsync(user, ct);
+            if (access == null) return Results.Unauthorized();
+            var area = await layout.GetAreaAsync(id, ct);
+            if (area == null) return Results.NotFound();
+            if (!access.FarmIds.Contains(area.FarmId))
+                return Results.Json(new { ok = false, error = "forbidden" }, statusCode: 403);
+            var detail = await layout.GetAreaDetailStatsAsync(id, ct);
+            var rows = await layout.ListRowsAsync(id, ct);
+            var boxes = await layout.ListBoxesByAreaAsync(id, ct);
+            return Results.Json(new { ok = true, detail, rows, boxes });
         });
 
         dashboard.MapGet("/areas/next-code", async (
