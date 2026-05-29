@@ -1,16 +1,29 @@
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using CrabFarmMonitor.Cloud.Data;
+using CrabFarmMonitor.Cloud.Data.Entities;
 
 namespace CrabFarmMonitor.Cloud.Services;
 
 public sealed class FarmAccess
 {
+    public Guid UserId { get; init; }
     public Guid OrgId { get; init; }
-    public string Role { get; init; } = "operator";
+    public string Role { get; init; } = "staff";
     public IReadOnlyList<Guid> FarmIds { get; init; } = Array.Empty<Guid>();
 
-    public bool IsOrgAdmin => Role is "owner" or "admin";
+    /// <summary>Admin / owner — xem và chọn mọi farm trong tổ chức.</summary>
+    public bool IsOrgAdmin => FarmRolePolicy.CanViewAllFarmsInOrg(Role);
+}
+
+public static class FarmRolePolicy
+{
+    public static bool CanViewAllFarmsInOrg(string? role)
+    {
+        if (string.IsNullOrWhiteSpace(role)) return false;
+        return role.Equals("admin", StringComparison.OrdinalIgnoreCase)
+            || role.Equals("owner", StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 public sealed class FarmScopeService
@@ -29,14 +42,35 @@ public sealed class FarmScopeService
         var orgClaim = user.FindFirstValue("org_id");
         if (!Guid.TryParse(orgClaim, out var orgId)) return null;
 
-        var role = user.FindFirstValue(ClaimTypes.Role) ?? "operator";
-        var farmIds = await _db.Farms.AsNoTracking()
-            .Where(f => f.OrgId == orgId)
+        var idClaim = user.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(idClaim, out var userId)) return null;
+
+        var role = user.FindFirstValue(ClaimTypes.Role) ?? "staff";
+        var farmIds = await QueryAccessibleFarmIdsAsync(orgId, userId, role, ct);
+
+        return new FarmAccess { UserId = userId, OrgId = orgId, Role = role, FarmIds = farmIds };
+    }
+
+    public async Task<List<Farm>> ListAccessibleFarmsAsync(FarmAccess access, CancellationToken ct) =>
+        await AccessibleFarmsQuery(access.OrgId, access.UserId, access.Role)
             .OrderBy(f => f.Code)
+            .ToListAsync(ct);
+
+    private async Task<List<Guid>> QueryAccessibleFarmIdsAsync(
+        Guid orgId,
+        Guid userId,
+        string role,
+        CancellationToken ct) =>
+        await AccessibleFarmsQuery(orgId, userId, role)
             .Select(f => f.Id)
             .ToListAsync(ct);
 
-        return new FarmAccess { OrgId = orgId, Role = role, FarmIds = farmIds };
+    private IQueryable<Farm> AccessibleFarmsQuery(Guid orgId, Guid userId, string role)
+    {
+        var q = _db.Farms.AsNoTracking().Where(f => f.OrgId == orgId);
+        if (!FarmRolePolicy.CanViewAllFarmsInOrg(role))
+            q = q.Where(f => f.OwnerId == userId);
+        return q;
     }
 
     /// <summary>Resolved farm for query. null = all farms in org (admin only).</summary>

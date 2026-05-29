@@ -1,8 +1,8 @@
 # CrabFarmMonitor Cloud
 
-API trung tâm (ASP.NET Core 8) — telemetry, HDF5 sync, auth, domain CRUD. Deploy **DigitalOcean App Platform** từ GitHub (không Docker image).
+API trung tâm (ASP.NET Core 8) — telemetry, HDF5 sync, auth, domain CRUD (trại/khu/dãy, WiFi/MQTT, camera AI). Deploy **DigitalOcean App Platform** từ GitHub (không Docker image).
 
-Edge gateway: repo [CrabFarmMonitorBE](../CrabFarmMonitorBE).
+Kiến trúc tổng thể: [ARCHITECTURE.md](../ARCHITECTURE.md). Edge gateway: [CrabFarmMonitorEdge](../CrabFarmMonitorEdge).
 
 ## Cấu trúc
 
@@ -74,7 +74,17 @@ Desktop: `CLOUD_API_URL=https://crabfarmmonitorcloud-uwkqk.ondigitalocean.app`
 
 Xem [.env.example](.env.example). App đọc `DATABASE_URL` hoặc `ConnectionStrings__Default`.
 
+## API domain (mới)
+
+| Nhóm | Endpoint |
+|------|----------|
+| Sync (X-API-Key) | `POST /api/sync/sensor-batch`, `POST /api/sync/camera/snapshot`, `POST /api/sync/camera/analysis` |
+| Layout (JWT) | `GET/POST /api/areas`, `GET/POST /api/areas/{id}/rows` |
+| Thiết bị (JWT) | `GET/PUT /api/devices/{id}/wifi`, `…/mqtt` |
+| Camera (JWT) | `GET /api/cameras`, `GET /api/cameras/{id}/snapshots`, `GET /api/ai/alerts` |
+
 ## Ghi chú
 
 - Bootstrap schema chạy lúc startup (`DevBootstrapService`, `CrabSchemaBootstrap`, …) nếu kết nối DB OK; vẫn nên chạy `apply-managed-db-schema.ps1` lần đầu.
 - HDF5 browse qua Python (`scripts/`) — App Platform mặc định không có Python; upload/sync HDF5 qua S3 vẫn hoạt động nếu cấu hình Spaces.
+- Ảnh camera khi chưa có S3: lưu `UPLOAD_DIR`, phục vụ qua `GET /api/media/{path}`.

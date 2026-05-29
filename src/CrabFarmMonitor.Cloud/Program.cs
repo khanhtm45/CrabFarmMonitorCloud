@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using CrabFarmMonitor.Cloud;
 using CrabFarmMonitor.Cloud.Configuration;
 using CrabFarmMonitor.Cloud.Data;
 using CrabFarmMonitor.Cloud.Data.Entities;
@@ -33,6 +34,11 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<CrabBoxService>();
 builder.Services.AddScoped<WaterAlertService>();
 builder.Services.AddScoped<DeviceShadowService>();
+builder.Services.AddScoped<SensorBatchSyncService>();
+builder.Services.AddScoped<FarmLayoutService>();
+builder.Services.AddScoped<DeviceConfigService>();
+builder.Services.AddScoped<CameraAiService>();
+builder.Services.AddSingleton<LocalMediaStorage>();
 builder.Services.AddSingleton<CloudMetricsCollector>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -86,6 +92,7 @@ using (var scope = app.Services.CreateScope())
         {
             Console.WriteLine("PostgreSQL: connected");
             await DevBootstrapService.EnsureAsync(db, config);
+            await DevBootstrapService.EnsureDemoFarmsAsync(db, config);
             await CrabSchemaBootstrap.EnsureAsync(db, config);
             await DomainSchemaBootstrap.EnsureAsync(db);
             await TelemetrySamplesBootstrap.EnsureAsync(db);
@@ -194,6 +201,9 @@ app.MapGet("/", () => Results.Json(new
         "GET /api/devices",
         "POST /api/telemetry (Edge, X-API-Key)",
         "POST /api/sync/hdf5 (Edge)",
+        "POST /api/sync/sensor-batch (Edge, X-API-Key)",
+        "POST /api/sync/camera/snapshot|analysis (Edge)",
+        "GET /api/areas|rows|cameras|ai/alerts (Bearer)",
         "GET /api/hdf5/uploads (Bearer)",
         "GET /api/hdf5/rows?uploadId= (Bearer)",
         "GET /api/telemetry/realtime",
@@ -236,11 +246,9 @@ app.MapGet("/api/auth/me", async (ClaimsPrincipal user, RasCloudDbContext db, Fa
     var access = await scope.LoadAsync(user, ct);
     var farms = access == null
         ? []
-        : await db.Farms.AsNoTracking()
-            .Where(f => f.OrgId == access.OrgId)
-            .OrderBy(f => f.Code)
+        : (await scope.ListAccessibleFarmsAsync(access, ct))
             .Select(f => new { f.Id, f.Code, f.Name })
-            .ToListAsync(ct);
+            .ToList();
 
     Guid? defaultFarmId = access == null ? null : scope.DefaultFarmId(access);
 
@@ -250,6 +258,7 @@ app.MapGet("/api/auth/me", async (ClaimsPrincipal user, RasCloudDbContext db, Fa
         user = new { u.Id, u.Email, u.DisplayName, u.Role, u.OrgId },
         farms,
         isOrgAdmin = access?.IsOrgAdmin ?? false,
+        canViewAllFarms = access?.IsOrgAdmin ?? false,
         defaultFarmId
     });
 }).RequireAuthorization();
@@ -315,16 +324,18 @@ dashboard.MapGet("/dashboard/summary", async (
     });
 });
 
-dashboard.MapGet("/farms", async (ClaimsPrincipal user, RasCloudDbContext db, FarmScopeService scope, CancellationToken ct) =>
+dashboard.MapGet("/farms", async (ClaimsPrincipal user, FarmScopeService scope, CancellationToken ct) =>
 {
     var access = await scope.LoadAsync(user, ct);
     if (access == null) return Results.Unauthorized();
-    var farms = await db.Farms.AsNoTracking()
-        .Where(f => f.OrgId == access.OrgId)
-        .OrderBy(f => f.Code)
-        .Select(f => new { f.Id, f.Code, f.Name, f.OrgId })
-        .ToListAsync(ct);
-    return Results.Json(new { ok = true, farms, isOrgAdmin = access.IsOrgAdmin });
+    var farms = await scope.ListAccessibleFarmsAsync(access, ct);
+    return Results.Json(new
+    {
+        ok = true,
+        farms = farms.Select(f => new { f.Id, f.Code, f.Name, f.OrgId }),
+        isOrgAdmin = access.IsOrgAdmin,
+        canViewAllFarms = access.IsOrgAdmin
+    });
 });
 
 dashboard.MapGet("/devices/{mac}/shadow", async (
@@ -542,6 +553,8 @@ dashboard.MapGet("/hdf5/rows", async (
         return Results.NotFound(new { ok = false, error = "upload not found" });
     return Results.Json(result);
 });
+
+app.MapDomainApis(CheckKey, FarmContext.ResolveFarmId);
 
 app.MapPost("/api/telemetry", async (HttpRequest req, TelemetryIngestService svc, CloudMetricsCollector metrics, CancellationToken ct) =>
 {
